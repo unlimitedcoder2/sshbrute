@@ -74,7 +74,6 @@ func main() {
 				conn.Close()
 			}
 			// mut.Unlock()
-			wg.Done()
 		})
 	}
 
